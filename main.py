@@ -9,8 +9,6 @@ def main():
 
     # Step 1: Run scanner
     results = scan_website(url)
-    print("[DEBUG] Results received in main:", results)
-    print("[DEBUG] Type of results in main:", type(results))
 
     # Step 2: Save report
     save_report(results)
