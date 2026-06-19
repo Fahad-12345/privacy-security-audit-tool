@@ -44,9 +44,13 @@ CompliCheck performs two layers of scanning:
 
 ## Screenshots
 
-<img width="1920" height="1017" alt="CompliCheck Report 1" src="https://github.com/user-attachments/assets/e11fd8ec-d7dd-42c0-938f-1ea22a34d67e" />
+<img width="1920" height="1017" alt="Screenshot (355)" src="https://github.com/user-attachments/assets/441cdaf6-a7f5-467f-b4b7-52d1d5829909" />
 
-<img width="1920" height="1080" alt="CompliCheck Report 2" src="https://github.com/user-attachments/assets/9f33230b-5b91-40ae-9e37-2b5a54dc92bd" />
+<img width="1920" height="1028" alt="Screenshot (356)" src="https://github.com/user-attachments/assets/3900d252-de77-4263-bc39-33e56e671e81" />
+
+<img width="1920" height="1014" alt="Screenshot (357)" src="https://github.com/user-attachments/assets/5f1cf747-cfbe-471f-819b-7c776ae4ee8e" />
+
+<img width="1920" height="1000" alt="Screenshot (358)" src="https://github.com/user-attachments/assets/5ecab2a8-12af-4bfc-8ea6-9cdebe92c3e4" />
 
 ---
 
