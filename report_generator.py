@@ -1,18 +1,3 @@
-# import os
-# from utils import generate_html_report
-
-# def save_report(results, filename="privacy_audit_report.html"):
-#     reports_dir = "reports"
-#     os.makedirs(reports_dir, exist_ok=True)
-
-#     file_path = os.path.join(reports_dir, filename)
-#     html_content = generate_html_report(results)
-
-#     with open(file_path, "w", encoding="utf-8") as f:
-#         f.write(html_content)
-
-#     print(f"[+] Report saved to {file_path}")
-
 import os
 from datetime import datetime
 from utils import generate_html_report

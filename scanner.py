@@ -5,6 +5,12 @@ from selenium.webdriver.chrome.service import Service
 import time
 import os
 import json
+from webdriver_manager.chrome import ChromeDriverManager
+
+def get_header(results, header_name):
+      """Case-insensitive header lookup"""
+      headers = results.get("security_headers", {})
+      return headers.get(header_name) or headers.get(header_name.lower())
 
 
 # ------------------------
@@ -13,7 +19,7 @@ import json
 def scan_website(url):
     if not url.startswith("http"):
         url = "https://" + url
-        
+
     suggestions = []
 
     results = {
@@ -30,8 +36,8 @@ def scan_website(url):
         "cookies": [],
         "third_party_trackers": [],
         "security_headers": {},
-        "gdpr_compliant": False,
-        "ccpa_compliant": False,
+        "gdpr_indicators": [],
+        "ccpa_indicators": [],
         "suggestions": suggestions
     }
 
@@ -45,7 +51,6 @@ def scan_website(url):
     # STEP 1: Static Scan
     # -------------------
     try:
-        # response = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
         response = fetch_page(url)
         soup = BeautifulSoup(response.text, "html.parser")
 
@@ -74,13 +79,13 @@ def scan_website(url):
         for form in forms:
             inputs = [inp.get("type", "text") for inp in form.find_all("input")]
             results["forms_details"].append({
-        "action": form.get("action") if form.get("action") else "N/A",
-        "method": form.get("method").upper() if form.get("method") else "GET",
-        "inputs": inputs,
-        "has_password": "password" in inputs,
-        "has_email": "email" in inputs,
-        "has_checkbox": "checkbox" in inputs
-    })
+                "action": form.get("action") if form.get("action") else "N/A",
+                "method": form.get("method").upper() if form.get("method") else "GET",
+                "inputs": inputs,
+                "has_password": "password" in inputs,
+                "has_email": "email" in inputs,
+                "has_checkbox": "checkbox" in inputs
+            })
 
         # Tracker detection
         scripts = [s.get("src", "").lower() for s in soup.find_all("script") if s.get("src")]
@@ -97,10 +102,14 @@ def scan_website(url):
     # STEP 2: Dynamic Scan (Selenium)
     # -------------------
     try:
-        chrome_path = os.path.join("drivers", "chromedriver.exe")
-        service = Service(chrome_path)
         options = webdriver.ChromeOptions()
-        options.add_argument("--headless")
+        options.add_argument("--headless=new")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
+
+        service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
 
         driver.get(url)
@@ -108,16 +117,9 @@ def scan_website(url):
 
         page_source = driver.page_source.lower()
 
-        # Cookie banner
-        # if any(k in page_source for k in ["cookie", "consent", "gdpr", "accept cookies"]):
-        #     results["cookie_banner"] = True
-        #     results["gdpr_compliant"] = True
+        # Cookie banner detection
         if check_cookie_banner(page_source):
-           results["cookie_banner"] = True
-
-        # CCPA
-        if "do not sell" in page_source or "ccpa" in page_source:
-            results["ccpa_compliant"] = True
+            results["cookie_banner"] = True
 
         # Cookies
         for cookie in driver.get_cookies():
@@ -128,63 +130,74 @@ def scan_website(url):
                 "httpOnly": cookie.get("httpOnly"),
                 "expiry": cookie.get("expiry")
             })
-        # 🔑 Fetch real browser response headers
+
+        # Real browser response headers
         headers = get_security_headers_selenium(driver, url)
         if headers:
             results["security_headers"] = headers
+
         driver.quit()
 
     except Exception as e:
         results["suggestions"].append(f"Selenium error: {e}")
-    
-    # -------------------
-    # Compliance Analysis (NEW)
-    # -------------------
-    results = analyze_compliance(results)
 
     # -------------------
-    # STEP 3: Suggestions
+    # STEP 3: Risk Indicator Analysis
+    # (No legal compliance claims — surface-level indicators only)
     # -------------------
-    # Privacy Policy
+    results = analyze_risk_indicators(results)
+
+    # -------------------
+    # STEP 4: Suggestions
+    # -------------------
+
     if results["privacy_policy_found"]:
-     suggestions.append("✅ Privacy Policy found and accessible")
+        suggestions.append("✅ Privacy Policy link found on the page")
     else:
-     suggestions.append("🔴 Privacy Policy not found – add one to improve compliance")
+        suggestions.append("🔴 No Privacy Policy link detected — recommended for user trust")
 
-# Terms & Conditions
     if results["terms_conditions_found"]:
-     suggestions.append("✅ Terms & Conditions page found")
+        suggestions.append("✅ Terms & Conditions link found on the page")
     else:
-     suggestions.append("🔴 Terms & Conditions missing – add one for transparency")
+        suggestions.append("🔴 No Terms & Conditions link detected")
 
-# Cookie Banner
     if results["cookie_banner"]:
-     suggestions.append("✅ Cookie consent banner detected")
+        suggestions.append("✅ Cookie consent banner indicators detected")
     else:
-     suggestions.append("🔴 Implement a Cookie Consent Banner")
+        suggestions.append("🔴 No cookie consent banner detected — consider adding one")
 
-# Forms
     if results["forms_found"] > 0:
-     suggestions.append(f"✅ {results['forms_found']} forms detected – ensure explicit consent for data collection")
+        suggestions.append(f"✅ {results['forms_found']} form(s) detected — review for data collection consent")
     else:
-     suggestions.append("🔴 No forms detected – verify if user input collection is required")
+        suggestions.append("ℹ️ No forms detected on this page")
 
-# Security headers
-    if results.get("security_headers", {}).get("Strict-Transport-Security"):
-     suggestions.append("✅ Strict-Transport-Security header present")
+    if results["third_party_trackers"]:
+        suggestions.append(f"⚠️ {len(results['third_party_trackers'])} third-party tracker(s) detected — review for privacy impact")
     else:
-     suggestions.append("🔴 Add Strict-Transport-Security header")
+        suggestions.append("✅ No common third-party trackers detected on this page")
 
-    if results.get("security_headers", {}).get("Content-Security-Policy"):
-     suggestions.append("✅ Content-Security-Policy header present")
+    if get_header(results, "Strict-Transport-Security"):
+       suggestions.append("✅ Strict-Transport-Security (HSTS) header present")
     else:
-     suggestions.append("🔴 Add Content-Security-Policy header")
+       suggestions.append("🔴 Strict-Transport-Security header missing — add for HTTPS enforcement")
 
-# Attach to results
+    if get_header(results, "Content-Security-Policy"):
+       suggestions.append("✅ Content-Security-Policy header present")
+    else:
+       suggestions.append("🔴 Content-Security-Policy header missing — helps prevent XSS attacks")
+
+    if get_header(results, "X-Frame-Options"):
+       suggestions.append("✅ X-Frame-Options header present — protects against clickjacking")
+    else:
+       suggestions.append("🔴 X-Frame-Options header missing")
+
+    if get_header(results, "X-Content-Type-Options"):
+       suggestions.append("✅ X-Content-Type-Options header present")
+    else:
+       suggestions.append("🔴 X-Content-Type-Options header missing")
+
     results["suggestions"] = suggestions
-
     return results
-
 
 
 # ------------------------
@@ -207,10 +220,12 @@ def fetch_page(url, retries=3, timeout=20):
                 time.sleep(2)
                 continue
             raise e
-        
+
+
 def analyze_policy_page(base_url, link):
     """Fetch a policy/terms page and check for important keywords"""
-    keywords = ["data", "personal", "cookies", "rights", "retention", "third parties", "consent"]
+    keywords = ["data", "personal", "cookies", "rights", "retention", "third parties", "consent",
+                "california", "ccpa", "do not sell", "gdpr"]
     found = []
     try:
         if link.startswith("/"):
@@ -231,7 +246,6 @@ def analyze_policy_page(base_url, link):
 
 
 def analyze_security_headers(headers):
-    """Check important security headers"""
     required_headers = [
         "Strict-Transport-Security",
         "Content-Security-Policy",
@@ -241,7 +255,7 @@ def analyze_security_headers(headers):
     ]
     result = {}
     for h in required_headers:
-        result[h] = headers.get(h, None)
+        result[h] = headers.get(h) or headers.get(h.lower()) or None
     return result
 
 def get_security_headers_selenium(driver, target_url):
@@ -260,59 +274,80 @@ def get_security_headers_selenium(driver, target_url):
         print(f"[DEBUG] Could not fetch headers via Selenium: {e}")
     return headers
 
+
 def check_cookie_banner(page_source: str) -> bool:
     """Detect cookie banner keywords in page source"""
-    keywords = ["cookie", "consent", "gdpr", "accept cookies", "privacy preferences"]
+    keywords = [
+        "cookie-consent", "cookieconsent", "accept cookies",
+        "cookie policy", "privacy preferences", "cookie settings",
+        "we use cookies", "gdpr", "consent banner"
+    ]
     return any(k in page_source for k in keywords)
 
-def analyze_compliance(results):
-    """Smarter compliance logic based on multiple signals"""
 
-    gdpr_signals = []
-    ccpa_signals = []
+def analyze_risk_indicators(results):
+    """
+    Collect surface-level privacy & security risk indicators.
+    
+    IMPORTANT: This does NOT determine legal GDPR/CCPA compliance.
+    These are automated surface checks only — not a legal audit.
+    Consult a qualified privacy attorney for legal compliance assessment.
+    """
+
+    gdpr_indicators = []
+    ccpa_indicators = []
 
     # ---------------------------
-    # GDPR signals
+    # GDPR surface indicators
     # ---------------------------
     if results.get("cookie_banner"):
-        gdpr_signals.append("Cookie banner present")
+        gdpr_indicators.append("Cookie consent banner detected")
 
     if results.get("privacy_policy_found"):
-        gdpr_signals.append("Privacy Policy present")
+        gdpr_indicators.append("Privacy Policy link present")
 
     if results.get("forms_found", 0) > 0:
         for form in results["forms_details"]:
             if form.get("has_checkbox"):
-                gdpr_signals.append("Form with consent checkbox detected")
+                gdpr_indicators.append("Form includes a checkbox (possible consent field)")
                 break
 
-    if results.get("security_headers", {}).get("Content-Security-Policy"):
-        gdpr_signals.append("Content-Security-Policy header present")
+    if get_header(results, "Content-Security-Policy"):
+        gdpr_indicators.append("Content-Security-Policy header present")
 
-    if results.get("security_headers", {}).get("Strict-Transport-Security"):
-        gdpr_signals.append("Strict-Transport-Security header present")
+    if get_header(results, "Strict-Transport-Security"):
+        gdpr_indicators.append("Strict-Transport-Security (HSTS) header present")
+
+    if not results.get("third_party_trackers"):
+        gdpr_indicators.append("No common third-party trackers detected")
 
     # ---------------------------
-    # CCPA signals
+    # CCPA surface indicators
     # ---------------------------
-    if "do not sell" in str(results.get("privacy_policy_keywords", [])).lower():
-        ccpa_signals.append("'Do Not Sell' clause in Privacy Policy")
+    privacy_keywords = results.get("privacy_policy_keywords", [])
+
+    if "do not sell" in str(privacy_keywords).lower():
+        ccpa_indicators.append("'Do Not Sell' language found in Privacy Policy")
 
     if results.get("cookie_banner"):
-        ccpa_signals.append("Cookie banner detected")
+        ccpa_indicators.append("Cookie consent mechanism detected")
 
-    if results.get("privacy_policy_link") and "us" in (results["privacy_policy_link"] or "").lower():
-        ccpa_signals.append("US-specific Privacy Policy link")
+    privacy_link = (results.get("privacy_policy_link") or "").lower()
+    if any(k in privacy_link for k in ["us", "california", "ccpa"]) or \
+       any(k in str(privacy_keywords).lower() for k in ["california", "ccpa", "do not sell"]):
+        ccpa_indicators.append("US/California privacy language detected in policy content")
 
     # ---------------------------
-    # Final decision
+    # Store indicator counts (not compliance verdicts)
     # ---------------------------
-    results["gdpr_compliant"] = "Likely Compliant" if len(gdpr_signals) >= 3 else "Not Compliant"
-    results["ccpa_compliant"] = "Likely Compliant" if len(ccpa_signals) >= 2 else "Not Compliant"
+    results["gdpr_indicators"] = gdpr_indicators
+    results["ccpa_indicators"] = ccpa_indicators
 
-    # Store details for transparency
-    results["gdpr_signals"] = gdpr_signals
-    results["ccpa_signals"] = ccpa_signals
+    # Indicator summary strings (honest language)
+    gdpr_count = len(gdpr_indicators)
+    ccpa_count = len(ccpa_indicators)
+
+    results["gdpr_indicator_summary"] = f"{gdpr_count}/6 GDPR-related indicators detected"
+    results["ccpa_indicator_summary"] = f"{ccpa_count}/3 CCPA-related indicators detected"
 
     return results
-
